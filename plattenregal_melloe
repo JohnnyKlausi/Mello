@@ -1,0 +1,209 @@
+#include <Adafruit_NeoPixel.h>
+
+const int ledPin        = 6;    // LED Pin for the WS2812
+const int strobePin     = 7;    // Strobe Pin on the MSGEQ7
+const int resetPin      = 8;    // Reset Pin on the MSGEQ7
+const int outPin        = A0;   // Output Pin on the MSGEQ7
+const int buttonPin     = 2;    // For the Button to change modes
+const int ledNum        = 34;   // Number of NeoPixels (=LEDs)
+const int ledMirror     = ledNum/2;
+const int numOfModes    = 3;    // Number of different modes
+const int period        = 200;   // Value after which counter "cntr" is going to be reseted
+int cntr                = 0;    // Counter for every loop cycle when adding value to array and overwrite oldest
+int btnclck             = 0;    // Counter for button clicks to toggle different modes
+int brightMulti       = 1;
+int flickMulti          = 1;
+int PP                  = 16;
+int fallSpeed           = 1;
+//int buttonState         = 0;    // 
+int level[7];                   // An array to hold the values from the 7 frequency bands in one loop
+int kickAry[period]; 
+int snareAry[period];              // Arrays of different values to calculate average
+int hihatAry[period];
+
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(ledNum, ledPin, NEO_GRB + NEO_KHZ800);
+ 
+void setup() { 
+  pinMode               (strobePin, OUTPUT); // Define pin modes
+  pinMode               (resetPin,  OUTPUT);
+  pinMode               (buttonPin, INPUT);
+  pinMode               (ledPin, OUTPUT);
+  
+  /*pinMode               (outPin,    INPUT);
+ 
+  // Create an initial state for our pins
+  digitalWrite          (resetPin,  LOW);
+  digitalWrite          (strobePin, LOW);
+  delay                 (1);
+ 
+  // Reset the MSGEQ7 as per the datasheet timing diagram
+  digitalWrite          (resetPin,  HIGH);
+  delay                 (1);
+  digitalWrite          (resetPin,  LOW);
+  digitalWrite          (strobePin, HIGH);
+  delay                 (1);*/
+
+  strip.begin();
+  //strip.show(); // Initialize all pixels
+ 
+}
+
+ 
+void loop() {
+
+
+  bool kickbeat        = false;
+  bool snarebeat       = false;
+  bool hatbeat         = false;  
+  long kickavg         = avg(kickAry, period); 
+  long snareavg        = avg(snareAry, period);
+  long hihatavg        = avg(hihatAry, period);
+  int kicklevel;
+  int snarelevel;
+  int hihatlevel;
+  //int buttonState      = digitalRead(buttonPin);
+
+/*
+  if (buttonState == HIGH) { // When button is clicked, incease "btnclck" counter or reset to 0
+    Serial.print       ("UAHHHH");
+    if (btnclck >= numOfModes){
+      btnclck = 0;
+    } else {
+      btnclck++;
+    }
+    delay(15);
+  }
+*/
+
+  digitalWrite         (resetPin, HIGH); // reset the MSGEQ7's cycle
+  digitalWrite         (strobePin, HIGH);
+  delayMicroseconds    (10);
+  digitalWrite         (strobePin, LOW);
+  delayMicroseconds    (10);
+  digitalWrite         (resetPin, LOW);
+  digitalWrite         (strobePin, HIGH);
+  delayMicroseconds    (10);
+  
+  // Cycle through each frequency band by pulsing the strobe.
+  for (int i = 0; i < 7; i++) {
+    digitalWrite       (strobePin, LOW);
+    delayMicroseconds  (5);                    // Delay necessary due to timing diagram
+    level[i] =         analogRead (outPin);
+    digitalWrite       (strobePin, HIGH);
+    delayMicroseconds  (5);                    // Delay necessary due to timing diagram  
+  }
+
+  kicklevel            = (level[0] + level[1])/2;
+  snarelevel           = level[3];
+  hihatlevel           = (level[5] + level[6])/2;
+
+
+
+  //Adding Value to the arrays "kickAry", "snareAry" and "hihatAry" when they are over a Threshhold
+  //Little bit of Noise reduction because the MSGEQ7 does bring back these values even when idle
+  if(kicklevel>70){
+    kickAry[cntr]         = kicklevel;
+  } else {
+    kickAry[cntr]         = 0;
+  }
+  
+  if(snarelevel>120){
+    snareAry[cntr]        = snarelevel;
+  } else {
+    snareAry[cntr]        = 0;
+  }
+
+  if(hihatlevel>160){
+    hihatAry[cntr]        = hihatlevel;
+  } else {
+    hihatAry[cntr]        = 0;
+  }
+
+  //detect wether a beat occured by compare latest entry by MSGEQ7 to the kickAry-Array to the average
+  if((kickAry[cntr] / kickavg) > 1){
+    kickbeat           = true;
+  }
+  if((snareAry[cntr] / snareavg) > 1){
+    snarebeat          = true;
+  }
+  if((hihatAry[cntr] / hihatavg) > 1){
+    hatbeat            = true;
+  }
+  
+  cntr++;
+  
+  if(cntr >= period){ // reset counter to 0 when over given number
+    cntr               = 0;
+  }
+  
+  setPosAndBri(kickbeat, snarebeat, hatbeat);
+  delay(1);
+}
+
+//function to calculate the average of values saved in a one frequency array, 
+long avg(int frq[], int a){
+  long sum = 0;
+  for (int i = 0; i < a; i++){
+    sum += frq[i];
+  }
+  return sum/a;
+}
+
+//necessary methods from the Adafruit_NeoPixel library
+void showStrip() {
+  strip.show();
+}
+
+void setPixel(int Pixel, byte red, byte green, byte blue) {
+  strip.setPixelColor(Pixel, strip.Color(red, green, blue));
+}
+
+void setAllPixels(){
+  firstLights();
+  showStrip();
+}
+
+//
+void setPosAndBri(bool kic, bool sna, bool hig){
+  if(hig){
+    brightMulti = 4;
+  } else {
+    brightMulti = 1;
+  }
+  if(sna){
+    flickMulti = 4;
+  } else {
+    flickMulti = 1;
+  }
+  if(kic || sna){
+    PP = 0;
+    fallSpeed = 1;
+  } else if (PP < 17){
+    PP = PP + fallSpeed;
+    if(fallSpeed <= 3){
+      fallSpeed += fallSpeed;
+    } else if (fallSpeed == 4){
+      fallSpeed = 5;
+    }
+  }
+  setAllPixels();
+}
+
+void firstLights(){  
+  int intensity = 17 - fallSpeed;
+  for(int i = 0; i < PP; i++){
+    setPixel(i, 63*flickMulti, 3, 0);
+    delayMicroseconds(10);
+    setPixel(ledNum - (1 + i), 63*flickMulti, 3, 0);
+  }
+  delayMicroseconds(10);
+  setPixel(PP, intensity, intensity, intensity);
+  delayMicroseconds(10);
+  setPixel(ledNum - 1 - PP, intensity, intensity, intensity);
+  delayMicroseconds(10);
+  for(int j = (ledMirror - 1); j > PP; j--){
+    setPixel(j, 63*brightMulti, 15, 0);
+    delayMicroseconds(10);
+    setPixel(ledNum - (1 + j), 63*brightMulti, 15, 0);
+  }  
+}
